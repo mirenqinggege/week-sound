@@ -57,8 +57,8 @@ Environment=PATH=/usr/local/bin:/usr/bin:/bin
 WantedBy=default.target
 EOF
 
-# 更新配置文件中的日志路径
-sed -i "s|/var/log/week-sound/week-sound.log|${LOG_DIR}/week-sound.log|g" "${CONFIG_DIR}/week-sound.conf" 2>/dev/null || true
+# 创建日志目录
+mkdir -p "${LOG_DIR}"
 
 # 重新加载 systemd 用户服务
 systemctl --user daemon-reload

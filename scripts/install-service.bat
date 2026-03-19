@@ -27,7 +27,8 @@ if exist "%~dp0..\config\week-sound.conf" (
         echo amplitude = 0.01
         echo.
         echo [general]
-        echo log_file = %ProgramData%\week-sound\week-sound.log
+        echo # log_file is auto-detected, uncomment to override
+        echo #log_file =
     ) > "%CONFIG_FILE%"
 )
 
