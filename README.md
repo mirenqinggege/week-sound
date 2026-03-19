@@ -106,39 +106,36 @@ sudo journalctl -u week-sound -f
 sudo ./scripts/uninstall-service.sh
 ```
 
-#### Windows 服务
+#### Windows 自动启动
+
+> **注意**: Windows 系统服务以 SYSTEM 账户运行，无法访问音频设备。因此本程序使用用户级自动启动（注册表 Run 键）而非系统服务。
 
 ```powershell
-# 以管理员身份运行 PowerShell
-
-# 安装服务
+# 安装自动启动
 .\build-win64\bin\week_sound.exe -install
 
-# 管理服务
-sc query WeekSoundService      # 查看状态
-sc stop WeekSoundService       # 停止服务
-sc start WeekSoundService      # 启动服务
-
-# 卸载服务
+# 卸载自动启动
 .\build-win64\bin\week_sound.exe -uninstall
 ```
 
 或使用脚本：
 
 ```powershell
-# 安装
+# 安装（无需管理员权限）
 .\scripts\install-service.bat
 
 # 卸载
 .\scripts\uninstall-service.bat
 ```
 
+安装后，程序会在用户登录时自动启动。
+
 ## 命令行参数
 
 | 参数 | 说明 |
 |-----|------|
-| `-install` | 安装为 Windows 服务 |
-| `-uninstall` | 卸载 Windows 服务 |
+| `-install` | 添加到用户自动启动（Windows） |
+| `-uninstall` | 从用户自动启动移除（Windows） |
 | `-h, --help` | 显示帮助信息 |
 
 ## 日志

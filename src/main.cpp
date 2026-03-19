@@ -15,19 +15,17 @@ extern bool should_continue_running();
 
 #ifdef WINDOWS_SERVICE
 #include <windows.h>
-extern bool is_running_as_service();
 extern bool should_continue_running();
 extern bool install_service(const std::string& executable_path);
 extern bool uninstall_service();
-extern void run_service();
-extern void signal_shutdown();
+extern void setup_console_handler();
 #endif
 
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [options]\n"
               << "Options:\n"
-              << "  -install      Install as system service (Windows only)\n"
-              << "  -uninstall    Uninstall system service (Windows only)\n"
+              << "  -install      Install as auto-start program (Windows only)\n"
+              << "  -uninstall    Remove auto-start program (Windows only)\n"
               << "  -h, --help    Show this help message\n";
 }
 
@@ -91,6 +89,10 @@ int main(int argc, char* argv[]) {
     // 设置信号处理
 #ifdef LINUX_SERVICE
     setup_signal_handlers();
+#endif
+
+#ifdef WINDOWS_SERVICE
+    setup_console_handler();
 #endif
 
     // 初始化音频播放器

@@ -6,163 +6,93 @@
 
 #include "logger.h"
 
-static SERVICE_STATUS g_service_status = {};
-static SERVICE_STATUS_HANDLE g_status_handle = nullptr;
 static std::atomic<bool> g_running(true);
-static std::atomic<bool> g_is_service(false);
 
-// 前向声明
-void service_main(DWORD argc, LPSTR* argv);
-void service_ctrl_handler(DWORD ctrl_code);
-void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint);
-
-// 服务入口点注册
-SERVICE_TABLE_ENTRY service_table[] = {
-    {(LPSTR)"WeekSoundService", (LPSERVICE_MAIN_FUNCTION)service_main},
-    {nullptr, nullptr}
-};
-
-bool is_running_as_service() {
-    return g_is_service.load();
+// Windows 控制台信号处理
+static BOOL WINAPI console_handler(DWORD ctrl_type) {
+    if (ctrl_type == CTRL_C_EVENT || ctrl_type == CTRL_BREAK_EVENT || ctrl_type == CTRL_CLOSE_EVENT) {
+        Logger::instance().info("Received shutdown signal");
+        g_running = false;
+        return TRUE;
+    }
+    return FALSE;
 }
 
 bool should_continue_running() {
     return g_running.load();
 }
 
-void signal_shutdown() {
-    g_running = false;
-}
-
 bool install_service(const std::string& executable_path) {
-    SC_HANDLE scm = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
-    if (!scm) {
-        Logger::instance().error("Failed to open Service Control Manager");
-        return false;
-    }
+    // 使用注册表实现用户登录时自动启动（非系统服务）
+    // 原因：Windows 系统服务以 SYSTEM 账户运行，无法访问音频设备
 
-    SC_HANDLE service = CreateServiceA(
-        scm,
-        "WeekSoundService",
-        "USB Soundcard Anti-Sleep Service",
-        SERVICE_ALL_ACCESS,
-        SERVICE_WIN32_OWN_PROCESS,
-        SERVICE_AUTO_START,
-        SERVICE_ERROR_NORMAL,
-        executable_path.c_str(),
-        nullptr, nullptr, nullptr, nullptr, nullptr
+    HKEY hkey;
+    LONG result = RegOpenKeyExA(
+        HKEY_CURRENT_USER,
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        0,
+        KEY_SET_VALUE,
+        &hkey
     );
 
-    if (!service) {
-        DWORD error = GetLastError();
-        CloseServiceHandle(scm);
-        if (error == ERROR_SERVICE_EXISTS) {
-            Logger::instance().warning("Service already exists");
-        } else {
-            Logger::instance().error("Failed to create service, error: " + std::to_string(error));
-        }
+    if (result != ERROR_SUCCESS) {
+        Logger::instance().error("Failed to open registry key, error: " + std::to_string(result));
         return false;
     }
 
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
+    // 设置自动启动项
+    result = RegSetValueExA(
+        hkey,
+        "WeekSound",
+        0,
+        REG_SZ,
+        (const BYTE*)executable_path.c_str(),
+        static_cast<DWORD>(executable_path.length() + 1)
+    );
 
-    Logger::instance().info("Service installed successfully");
+    RegCloseKey(hkey);
+
+    if (result != ERROR_SUCCESS) {
+        Logger::instance().error("Failed to set registry value, error: " + std::to_string(result));
+        return false;
+    }
+
+    Logger::instance().info("Auto-start entry added to registry (current user)");
+    Logger::instance().info("The program will start automatically when you log in");
     return true;
 }
 
 bool uninstall_service() {
-    SC_HANDLE scm = OpenSCManager(nullptr, nullptr, SC_MANAGER_ALL_ACCESS);
-    if (!scm) {
-        Logger::instance().error("Failed to open Service Control Manager");
+    // 从注册表删除自动启动项
+    HKEY hkey;
+    LONG result = RegOpenKeyExA(
+        HKEY_CURRENT_USER,
+        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+        0,
+        KEY_SET_VALUE,
+        &hkey
+    );
+
+    if (result != ERROR_SUCCESS) {
+        Logger::instance().error("Failed to open registry key, error: " + std::to_string(result));
         return false;
     }
 
-    SC_HANDLE service = OpenServiceA(scm, "WeekSoundService", SERVICE_ALL_ACCESS);
-    if (!service) {
-        CloseServiceHandle(scm);
-        Logger::instance().error("Service not found");
+    result = RegDeleteValueA(hkey, "WeekSound");
+    RegCloseKey(hkey);
+
+    if (result != ERROR_SUCCESS && result != ERROR_FILE_NOT_FOUND) {
+        Logger::instance().error("Failed to delete registry value, error: " + std::to_string(result));
         return false;
     }
 
-    // 先停止服务
-    SERVICE_STATUS status;
-    ControlService(service, SERVICE_CONTROL_STOP, &status);
-
-    bool result = DeleteService(service);
-
-    CloseServiceHandle(service);
-    CloseServiceHandle(scm);
-
-    if (result) {
-        Logger::instance().info("Service uninstalled successfully");
-    } else {
-        Logger::instance().error("Failed to delete service");
-    }
-
-    return result;
+    Logger::instance().info("Auto-start entry removed from registry");
+    return true;
 }
 
-void run_service() {
-    g_is_service = true;
-
-    if (!StartServiceCtrlDispatcherA(service_table)) {
-        Logger::instance().error("StartServiceCtrlDispatcher failed: " + std::to_string(GetLastError()));
-        g_running = false;
-    }
-}
-
-void service_main(DWORD argc, LPSTR* argv) {
-    (void)argc;
-    (void)argv;
-
-    g_status_handle = RegisterServiceCtrlHandlerA("WeekSoundService", service_ctrl_handler);
-    if (!g_status_handle) {
-        Logger::instance().error("RegisterServiceCtrlHandler failed");
-        return;
-    }
-
-    g_service_status.dwServiceType = SERVICE_WIN32_OWN_PROCESS;
-    g_service_status.dwControlsAccepted = SERVICE_ACCEPT_STOP | SERVICE_ACCEPT_PAUSE_CONTINUE;
-    report_service_status(SERVICE_START_PENDING, NO_ERROR, 3000);
-
-    // 服务启动完成
-    report_service_status(SERVICE_RUNNING, NO_ERROR, 0);
-    Logger::instance().info("Service started");
-}
-
-void service_ctrl_handler(DWORD ctrl_code) {
-    switch (ctrl_code) {
-        case SERVICE_CONTROL_STOP:
-            report_service_status(SERVICE_STOP_PENDING, NO_ERROR, 0);
-            g_running = false;
-            report_service_status(SERVICE_STOPPED, NO_ERROR, 0);
-            break;
-
-        case SERVICE_CONTROL_PAUSE:
-            report_service_status(SERVICE_PAUSE_PENDING, NO_ERROR, 0);
-            // 暂停逻辑可以在这里实现
-            report_service_status(SERVICE_PAUSED, NO_ERROR, 0);
-            break;
-
-        case SERVICE_CONTROL_CONTINUE:
-            report_service_status(SERVICE_CONTINUE_PENDING, NO_ERROR, 0);
-            // 恢复逻辑可以在这里实现
-            report_service_status(SERVICE_RUNNING, NO_ERROR, 0);
-            break;
-
-        default:
-            break;
-    }
-}
-
-void report_service_status(DWORD current_state, DWORD win32_exit_code, DWORD wait_hint) {
-    g_service_status.dwCurrentState = current_state;
-    g_service_status.dwWin32ExitCode = win32_exit_code;
-    g_service_status.dwWaitHint = wait_hint;
-    g_service_status.dwCheckPoint = (current_state == SERVICE_RUNNING || current_state == SERVICE_STOPPED) ? 0 : 1;
-
-    SetServiceStatus(g_status_handle, &g_service_status);
+// 初始化控制台信号处理
+void setup_console_handler() {
+    SetConsoleCtrlHandler(console_handler, TRUE);
 }
 
 #endif // WINDOWS_SERVICE
