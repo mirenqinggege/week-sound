@@ -18,6 +18,20 @@ std::string Config::get_default_config_path() {
     }
     return "C:\\ProgramData\\week-sound\\week-sound.conf";
 #else
+    // 优先使用用户级配置
+    const char* home = getenv("HOME");
+    if (!home) {
+        home = getpwuid(getuid())->pw_dir;
+    }
+    if (home) {
+        std::string user_config = std::string(home) + "/.config/week-sound/week-sound.conf";
+        // 检查用户配置是否存在
+        std::ifstream test(user_config);
+        if (test.good()) {
+            return user_config;
+        }
+    }
+    // 回退到系统级配置
     return "/etc/week-sound/week-sound.conf";
 #endif
 }
@@ -96,6 +110,14 @@ std::string Config::get_default_log_path() {
     }
     return "C:\\ProgramData\\week-sound\\week-sound.log";
 #else
+    // 优先使用用户级日志目录
+    const char* home = getenv("HOME");
+    if (!home) {
+        home = getpwuid(getuid())->pw_dir;
+    }
+    if (home) {
+        return std::string(home) + "/.local/share/week-sound/logs/week-sound.log";
+    }
     return "/var/log/week-sound/week-sound.log";
 #endif
 }
